@@ -7,11 +7,26 @@ from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True, slots=True)
+class GuildRoleState:
+    id: str
+    name: str
+    position: int
+    assignable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RoleTarget:
+    role_id: str
+    desired: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RoleJob:
     id: str
     lease_token: str
     discord_user_id: str
     desired: bool
+    roles: tuple[RoleTarget, ...] = ()
 
 
 class WarlordsSiteClient:
@@ -28,6 +43,7 @@ class WarlordsSiteClient:
         pass_role_id: int,
         pass_role_name: str,
         role_assignable: bool,
+        roles: tuple[GuildRoleState, ...] = (),
         error: str = "",
         limit: int = 20,
     ) -> list[RoleJob]:
@@ -39,6 +55,15 @@ class WarlordsSiteClient:
                 "pass_role_id": str(pass_role_id),
                 "pass_role_name": pass_role_name,
                 "role_assignable": role_assignable,
+                "roles": [
+                    {
+                        "id": role.id,
+                        "name": role.name,
+                        "position": role.position,
+                        "assignable": role.assignable,
+                    }
+                    for role in roles
+                ],
                 "error": error,
                 "limit": limit,
             },
@@ -46,15 +71,24 @@ class WarlordsSiteClient:
         jobs = payload.get("jobs", [])
         if not isinstance(jobs, list):
             raise RuntimeError("Warlords site returned an invalid role job list")
-        return [
-            RoleJob(
-                id=str(job["id"]),
-                lease_token=str(job["lease_token"]),
-                discord_user_id=str(job["discord_user_id"]),
-                desired=bool(job["desired"]),
+        parsed: list[RoleJob] = []
+        for job in jobs:
+            targets = job.get("roles", [])
+            if not isinstance(targets, list):
+                raise RuntimeError("Warlords site returned an invalid role target list")
+            parsed.append(
+                RoleJob(
+                    id=str(job["id"]),
+                    lease_token=str(job["lease_token"]),
+                    discord_user_id=str(job["discord_user_id"]),
+                    desired=bool(job["desired"]),
+                    roles=tuple(
+                        RoleTarget(role_id=str(target["role_id"]), desired=bool(target["desired"]))
+                        for target in targets
+                    ),
+                )
             )
-            for job in jobs
-        ]
+        return parsed
 
     def complete(self, job: RoleJob, *, error: str = "") -> None:
         self._request(

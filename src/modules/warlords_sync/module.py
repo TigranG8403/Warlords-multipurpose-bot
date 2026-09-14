@@ -9,7 +9,7 @@ from discord.ext import commands
 
 from core.module import BotModule
 
-from .client import RoleJob, WarlordsSiteClient
+from .client import GuildRoleState, RoleJob, RoleTarget, WarlordsSiteClient
 
 
 LOGGER = logging.getLogger(__name__)
@@ -51,6 +51,19 @@ class RoleSyncWorker:
         elif not _role_assignable(guild, role):
             error = "Роль проходки находится выше роли бота или является управляемой"
 
+        roles = ()
+        if guild is not None:
+            roles = tuple(
+                GuildRoleState(
+                    id=str(guild_role.id),
+                    name=guild_role.name,
+                    position=guild_role.position,
+                    assignable=_role_assignable(guild, guild_role),
+                )
+                for guild_role in guild.roles
+                if guild_role.id != guild.id
+            )
+
         jobs = await asyncio.to_thread(
             self.client.claim,
             bot_user_id=bot.user.id,
@@ -58,6 +71,7 @@ class RoleSyncWorker:
             pass_role_id=self.pass_role_id,
             pass_role_name=role.name if role is not None else "",
             role_assignable=not error,
+            roles=roles,
             error=error,
         )
         if error or guild is None or role is None:
@@ -65,7 +79,7 @@ class RoleSyncWorker:
         for job in jobs:
             job_error = ""
             try:
-                await _apply_role(guild, role, job)
+                await _apply_roles(guild, role, job)
             except Exception as exc:
                 job_error = _safe_error(exc)
                 LOGGER.warning("Не удалось применить роль для Discord user %s: %s", job.discord_user_id, job_error)
@@ -81,6 +95,20 @@ def _role_assignable(guild: discord.Guild, role: discord.Role) -> bool:
 
 
 async def _apply_role(guild: discord.Guild, role: discord.Role, job: RoleJob) -> None:
+    legacy_job = RoleJob(
+        id=job.id,
+        lease_token=job.lease_token,
+        discord_user_id=job.discord_user_id,
+        desired=job.desired,
+        roles=(RoleTarget(role_id=str(role.id), desired=job.desired),),
+    )
+    await _apply_roles(guild, role, legacy_job)
+
+
+async def _apply_roles(guild: discord.Guild, pass_role: discord.Role, job: RoleJob) -> None:
+    targets = job.roles or (RoleTarget(role_id=str(pass_role.id), desired=job.desired),)
+    if not job.discord_user_id and not any(target.desired for target in targets):
+        return
     try:
         user_id = int(job.discord_user_id)
     except ValueError as error:
@@ -90,14 +118,36 @@ async def _apply_role(guild: discord.Guild, role: discord.Role, job: RoleJob) ->
         try:
             member = await guild.fetch_member(user_id)
         except discord.NotFound:
-            if not job.desired:
+            if not any(target.desired for target in targets):
                 return
             raise RuntimeError("Участник не найден на Discord-сервере")
-    has_role = role in member.roles
-    if job.desired and not has_role:
-        await member.add_roles(role, reason="Действующая проходка Warlords")
-    elif not job.desired and has_role:
-        await member.remove_roles(role, reason="Проходка Warlords недействительна")
+
+    additions: list[discord.Role] = []
+    removals: list[discord.Role] = []
+    for target in targets:
+        try:
+            role_id = int(target.role_id)
+        except ValueError as error:
+            raise RuntimeError("Некорректный Discord role ID") from error
+        role = guild.get_role(role_id)
+        if role is None:
+            if target.desired:
+                raise RuntimeError(f"Discord-роль {target.role_id} не найдена")
+            continue
+        has_role = role in member.roles
+        if target.desired == has_role:
+            continue
+        if not _role_assignable(guild, role):
+            raise RuntimeError(f"Discord-роль {target.role_id} недоступна боту")
+        if target.desired:
+            additions.append(role)
+        else:
+            removals.append(role)
+
+    if additions:
+        await member.add_roles(*additions, reason="Синхронизация ролей Warlords")
+    if removals:
+        await member.remove_roles(*removals, reason="Синхронизация ролей Warlords")
 
 
 def _safe_error(error: Exception) -> str:
@@ -132,7 +182,7 @@ def build_module() -> BotModule:
 
     return BotModule(
         name="warlords_sync",
-        description="Синхронизирует роль проходки с правами на сайте.",
+        description="Синхронизирует Discord-роли с правами на сайте.",
         register=register,
         on_ready=on_ready,
     )
