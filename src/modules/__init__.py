@@ -17,6 +17,7 @@ DEFAULT_MODULES = (
     "flytrap",
     "greetings",
     "maintenance",
+    "warlords_sync",
 )
 
 
