@@ -69,6 +69,8 @@ class WarlordsSiteClient:
             },
         )
         jobs = payload.get("jobs", [])
+        if jobs is None:
+            jobs = []
         if not isinstance(jobs, list):
             raise RuntimeError("Warlords site returned an invalid role job list")
         parsed: list[RoleJob] = []

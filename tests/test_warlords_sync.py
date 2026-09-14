@@ -53,6 +53,18 @@ class RoleSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["roles"], [{"id": "11", "name": "Команда", "position": 5, "assignable": True}])
         self.assertEqual(jobs[0].roles[1], RoleTarget(role_id="11", desired=False))
 
+        with patch.object(client, "_request", return_value={"jobs": None}):
+            self.assertEqual(
+                client.claim(
+                    bot_user_id=1,
+                    guild_id=2,
+                    pass_role_id=10,
+                    pass_role_name="Проходка",
+                    role_assignable=True,
+                ),
+                [],
+            )
+
     def test_role_must_be_below_bot(self) -> None:
         role = FakeRole(10, 5)
         guild = SimpleNamespace(me=SimpleNamespace(top_role=FakeRole(20, 10)))
