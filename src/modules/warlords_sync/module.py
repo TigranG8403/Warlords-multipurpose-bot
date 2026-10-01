@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -10,6 +11,7 @@ from discord.ext import commands
 from core.module import BotModule
 
 from .client import GuildRoleState, RoleJob, RoleTarget, WarlordsSiteClient
+from .statistics import StatisticsOutbox, StatisticsWorker
 
 
 LOGGER = logging.getLogger(__name__)
@@ -166,6 +168,15 @@ def build_module() -> BotModule:
     guild_id = os.getenv("APP_COMMAND_GUILD_ID", "").strip()
     pass_role_id = os.getenv("WARLORDS_PASS_ROLE_ID", "").strip()
     worker = None
+    statistics_worker = None
+    if site_url and token and guild_id:
+        if len(token) < 32:
+            raise ValueError("WARLORDS_SITE_BOT_TOKEN must contain at least 32 characters.")
+        outbox_path = Path(__file__).resolve().parents[3] / "data" / "statistics.sqlite3"
+        try:
+            statistics_worker = StatisticsWorker(WarlordsSiteClient(site_url, token), int(guild_id), StatisticsOutbox(outbox_path))
+        except Exception:
+            LOGGER.exception("Discord statistics unavailable; role synchronization remains enabled.")
     if site_url and token and guild_id and pass_role_id:
         if len(token) < 32:
             raise ValueError("WARLORDS_SITE_BOT_TOKEN должен содержать не менее 32 символов.")
@@ -174,9 +185,12 @@ def build_module() -> BotModule:
         LOGGER.warning("Синхронизация ролей Warlords выключена: настройки не заполнены.")
 
     def register(_bot: commands.Bot) -> None:
-        return None
+        if statistics_worker is not None:
+            statistics_worker.register(_bot)
 
     async def on_ready(bot: commands.Bot) -> None:
+        if statistics_worker is not None:
+            statistics_worker.start(bot)
         if worker is not None:
             worker.start(bot)
 
