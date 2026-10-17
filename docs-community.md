@@ -15,6 +15,8 @@ role IDs managed by this integration are removed. Roles with unexpected
 permissions/hierarchy are not altered. Name matches alone never establish
 ownership of a role. Icons use the website's padded square PNG and require
 the guild's ROLE_ICONS feature.
+The worker reports this capability to the website even when no jobs are due.
+Unlocking role icons queues existing memberships for an idempotent icon update.
 
 `data/community.sqlite3` stores created-role ownership and notification
 delivery IDs. Keep it with the other persistent bot data across deployments.

@@ -100,3 +100,34 @@ class CommunityTests(unittest.IsolatedAsyncioTestCase):
             await self.worker.run_once(bot)
         self.assertTrue(request.call_args.args[1]["succeeded"])
         self.assertNotIn("answers",str(request.call_args))
+
+    async def test_reports_icon_capability_even_without_jobs(self):
+        bot = SimpleNamespace(get_guild=lambda _: self.guild)
+        for enabled in (False, True):
+            self.guild.features = ["ROLE_ICONS"] if enabled else []
+            with patch.object(self.client, "_request", return_value={"jobs": []}) as request:
+                await self.worker.run_once(bot)
+            self.assertEqual(request.call_args.args[1], {
+                "guild_id": "1", "role_icons_available": enabled,
+            })
+
+    async def test_disconnected_guild_does_not_report_feature_loss(self):
+        bot = SimpleNamespace(get_guild=lambda _: None)
+        with patch.object(self.client, "_request", return_value={"jobs": []}) as request:
+            await self.worker.run_once(bot)
+        self.assertNotIn("role_icons_available", request.call_args.args[1])
+
+    async def test_unlocked_icons_update_existing_role_without_rejoining(self):
+        role = Role(55555, "Фракция · Объединение")
+        self.roles.append(role)
+        self.member.roles = [role]
+        job = self.job(role_id="55555", banner_url="/media/faction-banners/" + "a" * 64 + ".png")
+        with patch.object(self.worker, "_icon", return_value=b"png") as icon:
+            await self.worker._membership(self.guild, job)
+            role.edit.assert_not_awaited()
+            self.guild.features = ["ROLE_ICONS"]
+            await self.worker._membership(self.guild, job)
+        icon.assert_called_once()
+        role.edit.assert_awaited_once_with(display_icon=b"png", reason="Символика фракции обновлена на сайте")
+        self.guild.create_role.assert_not_awaited()
+        self.member.add_roles.assert_not_awaited()

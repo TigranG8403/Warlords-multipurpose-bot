@@ -24,6 +24,7 @@ class CommunityWorker:
         self._task: asyncio.Task | None = None
         self._role_cache: dict[str, object] = {}
         self._icon_versions: dict[int, str] = {}
+        self._icons_supported: bool | None = None
         with closing(sqlite3.connect(path)) as db, db:
             db.execute("CREATE TABLE IF NOT EXISTS delivered (id TEXT PRIMARY KEY, delivered_at TEXT DEFAULT CURRENT_TIMESTAMP)")
             db.execute("CREATE TABLE IF NOT EXISTS owned_roles (faction_id TEXT PRIMARY KEY, role_id TEXT NOT NULL)")
@@ -44,11 +45,18 @@ class CommunityWorker:
 
     async def run_once(self, bot) -> None:
         self._role_cache.clear()
-        payload = await asyncio.to_thread(self.client._request, "/api/v1/bot/community/claim", {"guild_id":str(self.guild_id)})
+        guild = bot.get_guild(self.guild_id)
+        capabilities = {"guild_id": str(self.guild_id)}
+        if guild is not None:
+            available = "ROLE_ICONS" in guild.features
+            capabilities["role_icons_available"] = available
+            if available != self._icons_supported:
+                LOGGER.info("Discord faction role icons available: %s", available)
+                self._icons_supported = available
+        payload = await asyncio.to_thread(self.client._request, "/api/v1/bot/community/claim", capabilities)
         jobs = payload.get("jobs", [])
         if not isinstance(jobs, list):
             raise RuntimeError("Invalid community jobs")
-        guild = bot.get_guild(self.guild_id)
         for job in jobs:
             error = ""
             role_id = ""
