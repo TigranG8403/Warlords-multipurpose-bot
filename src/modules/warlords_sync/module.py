@@ -12,6 +12,7 @@ from core.module import BotModule
 
 from .client import GuildRoleState, RoleJob, RoleTarget, WarlordsSiteClient
 from .statistics import StatisticsOutbox, StatisticsWorker
+from .community import CommunityWorker
 
 
 LOGGER = logging.getLogger(__name__)
@@ -169,10 +170,12 @@ def build_module() -> BotModule:
     pass_role_id = os.getenv("WARLORDS_PASS_ROLE_ID", "").strip()
     worker = None
     statistics_worker = None
+    community_worker = None
     if site_url and token and guild_id:
         if len(token) < 32:
             raise ValueError("WARLORDS_SITE_BOT_TOKEN must contain at least 32 characters.")
         outbox_path = Path(__file__).resolve().parents[3] / "data" / "statistics.sqlite3"
+        community_worker = CommunityWorker(WarlordsSiteClient(site_url,token),int(guild_id),outbox_path.with_name("community.sqlite3"))
         try:
             statistics_worker = StatisticsWorker(WarlordsSiteClient(site_url, token), int(guild_id), StatisticsOutbox(outbox_path))
         except Exception:
@@ -189,6 +192,8 @@ def build_module() -> BotModule:
             statistics_worker.register(_bot)
 
     async def on_ready(bot: commands.Bot) -> None:
+        if community_worker is not None:
+            community_worker.start(bot)
         if statistics_worker is not None:
             statistics_worker.start(bot)
         if worker is not None:
